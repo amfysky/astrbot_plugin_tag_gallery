@@ -88,6 +88,11 @@ class ImageStore:
         p = self._path_for(h, meta["ext"])
         return p if p.exists() else None
 
+    def find_by_content(self, data: bytes) -> str | None:
+        """按图片内容（sha256）在池里查，命中返回完整 hash，否则 None"""
+        h = self._hash(data)
+        return h if h in self.images else None
+
     def resolve(self, prefix: str) -> tuple[str | None, str]:
         """短 hash 前缀 -> (完整hash, 状态)。状态: ok/none/ambiguous/tooshort"""
         prefix = prefix.strip().lower()

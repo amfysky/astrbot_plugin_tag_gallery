@@ -9,26 +9,44 @@ from ..utils import filter_text, get_image
 HEX = re.compile(r"^[0-9a-f]{4,64}$")
 
 HELP = (
-    "【pic 图库】(🔒=需要管理员)\n"
-    "🔒 pic save <标签...>        带图/引用图，存图并打标签\n"
-    "🔒 pic tag <短hash> <标签...>   给图追加标签\n"
-    "🔒 pic untag <短hash> <标签...> 移除标签(清空则删图)\n"
-    "🔒 pic delete <短hash...>      彻底删除图片\n"
-    "🔒 pic gc                    手动清理无用图片\n"
-    "pic view <标签>              查看该标签下所有图(拼图)\n"
-    "pic view <短hash>            查看单张原图\n"
-    "pic tags                    列出所有标签\n"
-    "pic info <短hash>            查看某图的标签/创建者\n"
-    "pic search <关键词>          语义检索(接入 embedding 后启用)"
+    "【pic 图库】(🔒=需管理员；下方 <短hash> 都可改成「引用那张图」)\n"
+    "🔒 pic save <标签...>            带图/引用图，存图并打标签\n"
+    "🔒 pic tag [短hash] <标签...>    给图追加标签\n"
+    "🔒 pic untag [短hash] <标签...>  移除标签(清空则删图)\n"
+    "🔒 pic delete [短hash...]        删除图片\n"
+    "🔒 pic gc                        手动清理无用图片\n"
+    "pic view <标签>                  查看该标签下所有图(拼图)\n"
+    "pic view <短hash>                查看单张原图\n"
+    "pic tags                        列出所有标签\n"
+    "pic info [短hash]                查看某图的标签/创建者\n"
+    "pic search <关键词>              语义检索(接入 embedding 后启用)"
 )
 
 
 class GalleryOperate:
-    WRITE_SUBS = {"save", "tag", "untag", "delete", "del", "gc"}
-
     def __init__(self, store: ImageStore, merger: GalleryImageMerger):
         self.store = store
         self.merger = merger
+
+        # (规范名, handler, 是否写操作, 中文别名...) —— 路由与管理员校验从一处生成
+        spec = [
+            ("save", self._save, True, "存图", "存", "添加"),
+            ("tag", self._tag, True, "打标", "加标签", "标"),
+            ("untag", self._untag, True, "去标", "删标签"),
+            ("delete", self._delete, True, "del", "删图", "删", "删除"),
+            ("gc", self._gc, True, "清理"),
+            ("view", self._view, False, "看图", "看", "查看"),
+            ("tags", self._tags, False, "标签", "标签列表"),
+            ("info", self._info, False, "信息", "详情", "图片信息"),
+            ("search", self._search, False, "搜图", "找图", "搜"),
+        ]
+        self._routes: dict = {}
+        self._writes: set = set()
+        for name, fn, is_write, *aliases in spec:
+            for key in (name, *aliases):
+                self._routes[key] = fn
+                if is_write:
+                    self._writes.add(key)
 
     # ---------------- 分发 ----------------
 
@@ -48,22 +66,11 @@ class GalleryOperate:
             return
         sub, rest = tokens[0].lower(), tokens[1:]
 
-        if sub in self.WRITE_SUBS and not event.is_admin():
+        if sub in self._writes and not event.is_admin():
             await event.send(event.plain_result("该操作需要管理员权限"))
             return
 
-        handler = {
-            "save": self._save,
-            "tag": self._tag,
-            "untag": self._untag,
-            "delete": self._delete,
-            "del": self._delete,
-            "gc": self._gc,
-            "view": self._view,
-            "tags": self._tags,
-            "info": self._info,
-            "search": self._search,
-        }.get(sub)
+        handler = self._routes.get(sub)
         if not handler:
             await event.send(event.plain_result(f"未知子指令：{sub}\n\n{HELP}"))
             return
@@ -71,17 +78,33 @@ class GalleryOperate:
 
     # ---------------- 工具 ----------------
 
-    async def _resolve(self, event: AstrMessageEvent, prefix: str) -> str | None:
-        full, status = self.store.resolve(prefix)
-        if status == "ok":
-            return full
-        msg = {
+    @staticmethod
+    def _resolve_msg(prefix: str, status: str) -> str:
+        return {
             "tooshort": "短hash 至少要 4 位",
             "none": f"找不到图片 [{prefix}]",
             "ambiguous": f"短hash [{prefix}] 有歧义，请多写几位",
         }[status]
-        await event.send(event.plain_result(msg))
-        return None
+
+    async def _target(
+        self, event: AstrMessageEvent, rest: list[str]
+    ) -> tuple[str | None, list[str], str]:
+        """定位目标图片：优先引用/附带的图片（按内容查池），否则用首参短hash。
+
+        返回 (完整hash, 剩余参数, 错误信息)。命中时错误信息为空串。
+        """
+        image = await get_image(event)
+        if isinstance(image, bytes):
+            h = self.store.find_by_content(image)
+            if h:
+                return h, rest, ""  # 引用了图：剩余参数全是标签
+            return None, [], "这张图不在库里（可先 pic save 存入）"
+        if rest:
+            full, status = self.store.resolve(rest[0])
+            if status == "ok":
+                return full, rest[1:], ""
+            return None, [], self._resolve_msg(rest[0], status)
+        return None, [], "请引用要操作的图片，或给出短hash"
 
     @staticmethod
     def _clean_tags(raw: list[str]) -> list[str]:
@@ -105,13 +128,12 @@ class GalleryOperate:
         )
 
     async def _tag(self, event: AstrMessageEvent, rest: list[str]):
-        if len(rest) < 2:
-            await event.send(event.plain_result("用法：pic tag <短hash> <标签...>"))
-            return
-        full = await self._resolve(event, rest[0])
+        """pic tag <短hash> <标签...>  或  (引用图) pic tag <标签...>"""
+        full, extra, err = await self._target(event, rest)
         if not full:
+            await event.send(event.plain_result(err))
             return
-        tags = self._clean_tags(rest[1:])
+        tags = self._clean_tags(extra)
         if not tags:
             await event.send(event.plain_result("请指定要添加的标签"))
             return
@@ -121,13 +143,15 @@ class GalleryOperate:
         )
 
     async def _untag(self, event: AstrMessageEvent, rest: list[str]):
-        if len(rest) < 2:
-            await event.send(event.plain_result("用法：pic untag <短hash> <标签...>"))
-            return
-        full = await self._resolve(event, rest[0])
+        """pic untag <短hash> <标签...>  或  (引用图) pic untag <标签...>"""
+        full, extra, err = await self._target(event, rest)
         if not full:
+            await event.send(event.plain_result(err))
             return
-        tags = self._clean_tags(rest[1:])
+        tags = self._clean_tags(extra)
+        if not tags:
+            await event.send(event.plain_result("请指定要移除的标签"))
+            return
         remaining, deleted = self.store.remove_tags(full, tags)
         if deleted:
             await event.send(
@@ -141,8 +165,22 @@ class GalleryOperate:
             )
 
     async def _delete(self, event: AstrMessageEvent, rest: list[str]):
+        """(引用图) pic delete  或  pic delete <短hash...>"""
+        # 引用/附带图片 → 删这一张
+        image = await get_image(event)
+        if isinstance(image, bytes):
+            h = self.store.find_by_content(image)
+            if not h:
+                await event.send(event.plain_result("这张图不在库里"))
+                return
+            self.store.delete(h)
+            await event.send(event.plain_result(f"已删除 [{self.store.short(h)}]"))
+            return
+        # 否则按短hash 批量删
         if not rest:
-            await event.send(event.plain_result("用法：pic delete <短hash...>"))
+            await event.send(
+                event.plain_result("请引用要删的图片，或：pic delete <短hash...>")
+            )
             return
         done = []
         for prefix in rest:
@@ -198,11 +236,10 @@ class GalleryOperate:
         await event.send(event.plain_result(f"共 {len(counts)} 个标签：\n{body}"))
 
     async def _info(self, event: AstrMessageEvent, rest: list[str]):
-        if not rest:
-            await event.send(event.plain_result("用法：pic info <短hash>"))
-            return
-        full = await self._resolve(event, rest[0])
+        """pic info <短hash>  或  (引用图) pic info"""
+        full, _, err = await self._target(event, rest)
         if not full:
+            await event.send(event.plain_result(err))
             return
         m = self.store.images[full]
         await event.send(

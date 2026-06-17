@@ -1,60 +1,10 @@
 {
     "galleries_dir": {
-        "description": "图库总目录",
+        "description": "图片池根目录",
         "type": "string",
         "obvious_hint": true,
-        "hint": "总目录下存储着各个图库的文件夹, 支持绝对路径和相对路径",
+        "hint": "存放 images/ 图片池与 index.json 索引，支持绝对/相对路径；旧的图库文件夹放这里会自动迁移",
         "default": "data/plugin_data/astrbot_plugin_gallery/galleries"
-    },
-    "add_default": {
-        "description": "新建图库时的默认参数",
-        "type": "object",
-        "hint": "",
-        "items": {
-            "compress": {
-                "description": "自动压缩",
-                "type": "bool",
-                "hint": "开启后，往新图库存图时，若图片尺寸大于 512 x 512 则压缩图片，此尺寸的图片QQ会显示为表情包大小",
-                "default": true
-            },
-            "capacity": {
-                "description": "图库的默认容量上限",
-                "type": "int",
-                "hint": "图库中的图片数量达到此数量时，图库将无法添加图片，为了区别QQ号与数值，设置的数值不要超过10000",
-                "default": 200
-            },
-            "name_max_length": {
-                "description": "图库名最大长度（字符）",
-                "type": "int",
-                "hint": "用户设定的图库名长度超过此长度会被截断(仅对公共图库生效)",
-                "default": 10
-            }
-        }
-    },
-    "perm_config": {
-        "description": "权限设置",
-        "type": "object",
-        "hint": "以下是公共图库的权限设置，个人图库默认只能由本人或管理员操作",
-        "items": {
-            "allow_add": {
-                "description": "允许非管理员向公共图库添加图片",
-                "type": "bool",
-                "hint": "图库的图片太少时建议打开，不过要小心被别人塞进不好的图片",
-                "default": true
-            },
-            "allow_del": {
-                "description": "允许非管理员删除公共图库的图片",
-                "type": "bool",
-                "hint": "建议关闭",
-                "default": false
-            },
-            "allow_view": {
-                "description": "允许非管理员查看公共图库的图片",
-                "type": "bool",
-                "hint": "建议打开",
-                "default": true
-            }
-        }
     },
     "auto_collect": {
         "description": "自动收集配置",
@@ -85,37 +35,6 @@
                 "type": "int",
                 "hint": "冷却时间内不收集图片进行打标，可有效防止LLM被频繁调用",
                 "default": 120
-            }
-        }
-    },
-    "auto_match": {
-        "description": "自动发表情配置",
-        "type": "object",
-        "hint": "注意：本插件采用纯算法，根据图库标签来匹配表情包，避免了匹配阶段对token的消耗",
-        "items": {
-            "user_prob": {
-                "description": "匹配用户消息的概率",
-                "type": "float",
-                "hint": "设为 0 则关闭，设为 1 则每条用户发的消息都进行匹配",
-                "default": 0
-            },
-            "user_threshold": {
-                "description": "匹配用户消息的阈值",
-                "type": "float",
-                "hint": "用户发的消息与某图库标签匹配后，得到的相似度若大于此阈值时，则匹配成功，然后从此图库随机抽取一张图片来发送",
-                "default": 0.5
-            },
-            "llm_prob": {
-                "description": "匹配LLM消息的概率",
-                "type": "float",
-                "hint": "设为 0 则关闭，设为 1 则每条LLM返回的消息都进行匹配",
-                "default": 0
-            },
-            "llm_threshold": {
-                "description": "匹配LLM消息的阈值",
-                "type": "float",
-                "hint": "LLM响应返回的消息与某图库标签匹配后，得到的相似度若大于此阈值时，则匹配成功，然后从此图库随机抽取一张图片来发送",
-                "default": 0.5
             }
         }
     },

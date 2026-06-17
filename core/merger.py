@@ -1,5 +1,3 @@
-import os
-import time
 from io import BytesIO
 from pathlib import Path
 
@@ -9,27 +7,33 @@ from astrbot.api import logger
 
 
 class GalleryImageMerger:
-    """图库图片合并器"""
-    def __init__(self, thumb_size=(128, 128), delay=0.05):
-        self.font_path = Path("data/plugins/astrbot_plugin_gallery/zzgf_dianhei.otf")
-        self.thumbnail_size = thumb_size
-        self.delay = delay
+    """把一组图片拼成一张预览图，每张图下方标注其短 hash"""
 
-    def _process_image(self, img_path, sequence_number, font) -> Image.Image | None:
+    def __init__(self, thumb_size=(128, 128)):
+        self.font_path = Path(__file__).parent.parent / "zzgf_dianhei.otf"
+        self.thumbnail_size = thumb_size
+
+    def _process_image(self, img_path, label, font) -> Image.Image | None:
         try:
             img = Image.open(img_path)
             # GIF 取第一帧
             if img.format == "GIF":
                 img.seek(0)
-            # 转换为 RGB
-            img = img.convert("RGB")
-            # 缩放
-            img = img.resize(self.thumbnail_size)
+            # 转换为 RGB：透明图（P/RGBA/LA）直接 convert("RGB") 会把透明区域
+            # 填成调色板默认色（常表现为发绿/发黑），需先合成到白底再转 RGB
+            if img.mode in ("P", "RGBA", "LA"):
+                img = img.convert("RGBA")
+                bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+                img = Image.alpha_composite(bg, img).convert("RGB")
+            else:
+                img = img.convert("RGB")
+            # 缩放（用 LANCZOS 提升清晰度）
+            img = img.resize(self.thumbnail_size, Image.Resampling.LANCZOS)
 
             draw = ImageDraw.Draw(img)
 
             # 文本尺寸
-            bbox = draw.textbbox((0, 0), sequence_number, font=font)
+            bbox = draw.textbbox((0, 0), label, font=font)
             text_w = bbox[2] - bbox[0]
             text_h = bbox[3] - bbox[1]
 
@@ -48,8 +52,8 @@ class GalleryImageMerger:
                 [(circle_x1, circle_y1), (circle_x2, circle_y2)], fill=(255, 255, 255)
             )
 
-            # 序号
-            draw.text((text_x, text_y), sequence_number, font=font, fill=(0, 0, 0))
+            # 短 hash 标签
+            draw.text((text_x, text_y), label, font=font, fill=(0, 0, 0))
 
             return img
 
@@ -57,50 +61,29 @@ class GalleryImageMerger:
             logger.error(f"加载图片 {img_path} 时出错：{e}")
             return None
 
-    def create_merged(self, folder_path: str) -> bytes | None:
+    def create_merged(self, items: list[tuple[str, str]]) -> bytes | None:
+        """items: [(图片路径, 短hash标签), ...]，按给定顺序拼图"""
         thumb_w, thumb_h = self.thumbnail_size
 
-        # 文件名排序
-        image_files = sorted(
-            [
-                f
-                for f in os.listdir(folder_path)
-                if f.lower().endswith((".jpg", ".jpeg", ".png", ".bmp", ".gif"))
-            ],
-            key=lambda x: int(x.split("_")[1]),
-        )
-
-        if not image_files:
-            logger.warning("没有找到符合条件的图片文件")
+        if not items:
+            logger.warning("没有可拼接的图片")
             return None
 
-        total = len(image_files)
+        total = len(items)
         images_per_row = 5 if total <= 40 else 10
-
-        # 合图宽度规则
-        if total <= 5:
-            width = thumb_w * total
-        else:
-            width = thumb_w * images_per_row
-
+        width = thumb_w * (total if total <= 5 else images_per_row)
         height = thumb_h * ((total + images_per_row - 1) // images_per_row)
 
         merged = Image.new("RGB", (width, height), (255, 255, 255))
-
         font = ImageFont.truetype(self.font_path, 15)
 
-        for idx, filename in enumerate(image_files):
-            img_path = os.path.join(folder_path, filename)
-            seq = filename.split("_")[1]
-
-            img = self._process_image(img_path, seq, font)
+        for idx, (img_path, label) in enumerate(items):
+            img = self._process_image(img_path, label, font)
             if img:
                 x = (idx % images_per_row) * thumb_w
                 y = (idx // images_per_row) * thumb_h
                 merged.paste(img, (x, y))
 
-            time.sleep(self.delay)
-
         out = BytesIO()
-        merged.save(out, format="JPEG")
+        merged.save(out, format="JPEG", quality=95)
         return out.getvalue()

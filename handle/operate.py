@@ -1,235 +1,219 @@
-from astrbot.api import logger
-from astrbot.core import AstrBotConfig
-from astrbot.core.message.components import Image
-from astrbot.core.platform import AstrMessageEvent
-from astrbot.core.utils.session_waiter import SessionController, session_waiter
-from data.plugins.astrbot_plugin_gallery.utils import (
-    get_args,
-    get_image,
-)
+import re
 
-from ..core import Gallery, GalleryImageMerger, GalleryManager
+from astrbot.core.message.components import Image, Plain
+from astrbot.core.platform import AstrMessageEvent
+
+from ..core import GalleryImageMerger, ImageStore
+from ..utils import filter_text, get_image
+
+HEX = re.compile(r"^[0-9a-f]{4,64}$")
+
+HELP = (
+    "【pic 图库】(🔒=需要管理员)\n"
+    "🔒 pic save <标签...>        带图/引用图，存图并打标签\n"
+    "🔒 pic tag <短hash> <标签...>   给图追加标签\n"
+    "🔒 pic untag <短hash> <标签...> 移除标签(清空则删图)\n"
+    "🔒 pic delete <短hash...>      彻底删除图片\n"
+    "🔒 pic gc                    手动清理无用图片\n"
+    "pic view <标签>              查看该标签下所有图(拼图)\n"
+    "pic view <短hash>            查看单张原图\n"
+    "pic tags                    列出所有标签\n"
+    "pic info <短hash>            查看某图的标签/创建者\n"
+    "pic search <关键词>          语义检索(接入 embedding 后启用)"
+)
 
 
 class GalleryOperate:
-    def __init__(
-        self, config: AstrBotConfig, manager: GalleryManager, merger: GalleryImageMerger
-    ):
-        self.manager = manager
-        self.conf = config
+    WRITE_SUBS = {"save", "tag", "untag", "delete", "del", "gc"}
+
+    def __init__(self, store: ImageStore, merger: GalleryImageMerger):
+        self.store = store
         self.merger = merger
 
-    def verify_perm(
-        self, event: AstrMessageEvent, gallery: Gallery, allow_noadmin: bool
-    ) -> bool:
-        """验证权限"""
-        if not allow_noadmin or (gallery.name.isdigit() and int(gallery.name) > 10000):
-            if not event.is_admin() and event.get_sender_id() != gallery.name:
-                return False
-        return True
+    # ---------------- 分发 ----------------
 
-    async def set_tags(self, event: AstrMessageEvent):
-        """设置图库的标签"""
-        args = await get_args(event)
-        name = args["names"][0]
-        tags = args["texts"]
-        gallery = self.manager.get_gallery(name)
-        if not gallery:
-            await event.send(event.plain_result(f"未找到图库【{name}】"))
+    @staticmethod
+    def _tokens(event: AstrMessageEvent) -> list[str]:
+        """从 Plain 段取参数（避开引用概要/[MSG_ID:] 污染），去掉 pic 指令词"""
+        plain = "".join(
+            seg.text for seg in event.get_messages() if isinstance(seg, Plain)
+        )
+        plain = re.sub(r"\[MSG_ID:[^\]]*\]", " ", plain)
+        return plain.strip().split()[1:]
+
+    async def dispatch(self, event: AstrMessageEvent):
+        tokens = self._tokens(event)
+        if not tokens:
+            await event.send(event.plain_result(HELP))
             return
+        sub, rest = tokens[0].lower(), tokens[1:]
+
+        if sub in self.WRITE_SUBS and not event.is_admin():
+            await event.send(event.plain_result("该操作需要管理员权限"))
+            return
+
+        handler = {
+            "save": self._save,
+            "tag": self._tag,
+            "untag": self._untag,
+            "delete": self._delete,
+            "del": self._delete,
+            "gc": self._gc,
+            "view": self._view,
+            "tags": self._tags,
+            "info": self._info,
+            "search": self._search,
+        }.get(sub)
+        if not handler:
+            await event.send(event.plain_result(f"未知子指令：{sub}\n\n{HELP}"))
+            return
+        await handler(event, rest)
+
+    # ---------------- 工具 ----------------
+
+    async def _resolve(self, event: AstrMessageEvent, prefix: str) -> str | None:
+        full, status = self.store.resolve(prefix)
+        if status == "ok":
+            return full
+        msg = {
+            "tooshort": "短hash 至少要 4 位",
+            "none": f"找不到图片 [{prefix}]",
+            "ambiguous": f"短hash [{prefix}] 有歧义，请多写几位",
+        }[status]
+        await event.send(event.plain_result(msg))
+        return None
+
+    @staticmethod
+    def _clean_tags(raw: list[str]) -> list[str]:
+        return [t for t in (filter_text(x) for x in raw) if t]
+
+    # ---------------- 写操作 ----------------
+
+    async def _save(self, event: AstrMessageEvent, rest: list[str]):
+        tags = self._clean_tags(rest)
         if not tags:
-            await event.send(event.plain_result("未指定标签"))
+            await event.send(event.plain_result("用法：pic save <标签...>（至少一个标签）"))
             return
-        result = await self.manager.set_tags(name, tags)
-        await event.send(event.plain_result(result))
-
-    async def set_max_capacity(self, event: AstrMessageEvent):
-        """设置指定图库的最大容量"""
-        args = await get_args(event)
-        name = args["names"][0]
-        capacity = args["numbers"][0]
-        result = await self.manager.set_capacity(name, capacity=capacity)
-        await event.send(event.plain_result(result))
-
-    async def set_compress(self, event: AstrMessageEvent, mode: bool):
-        """打开/关闭图库的压缩开关"""
-        args = await get_args(event)
-        result = []
-        for name in args["names"]:
-            gallery = self.manager.get_gallery(name)
-            if not gallery:
-                result.append(f"未找到图库【{name}】")
-            else:
-                msg = await self.manager.set_compress(name, compress=mode)
-                result.append(msg)
-        await event.send(event.plain_result("\n".join(result)))
-
-    async def add_images(self, event: AstrMessageEvent):
-        """
-        存图 图库名 序号 (图库名不填则默认自己昵称，序号指定时会替换掉原图)
-        """
-        args = await get_args(event)
-        name = args["names"][0]
-        index = args["numbers"][0]
-        author = args["labels"][0]
-
-        sender_id = event.get_sender_id()
-        sender_name = event.get_sender_name()
-
-        gallery = self.manager.get_gallery(name) or await self.manager.create_gallery(
-            name, sender_id, sender_name
+        image = await get_image(event)
+        if not isinstance(image, bytes):
+            await event.send(event.plain_result("请在指令里附带图片，或引用一张图片"))
+            return
+        short, is_new = self.store.add(image, tags, event.get_sender_id())
+        verb = "已存图" if is_new else "图片已存在，已合并标签"
+        await event.send(
+            event.plain_result(f"{verb} [{short}]，标签：{'、'.join(tags)}")
         )
 
-        #  权限验证
-        perm = self.conf["perm_config"]["allow_add"]
-        if self.verify_perm(event, gallery, perm) is False:
-            await event.send(event.plain_result(f"你无权操作图库【{name}】"))
+    async def _tag(self, event: AstrMessageEvent, rest: list[str]):
+        if len(rest) < 2:
+            await event.send(event.plain_result("用法：pic tag <短hash> <标签...>"))
             return
+        full = await self._resolve(event, rest[0])
+        if not full:
+            return
+        tags = self._clean_tags(rest[1:])
+        if not tags:
+            await event.send(event.plain_result("请指定要添加的标签"))
+            return
+        now = self.store.add_tags(full, tags)
+        await event.send(
+            event.plain_result(f"[{self.store.short(full)}] 现有标签：{'、'.join(now)}")
+        )
 
-        #  获取图片
-        image = await get_image(event)
-
-        #  图片存在，直接图片处理
-        if image:
-            succ, result = gallery.add_image(image=image, author=author, index=index)  # type: ignore
-            if succ:
-                await event.send(event.plain_result(result))
-        #  图片不存在，等待用户发图片
+    async def _untag(self, event: AstrMessageEvent, rest: list[str]):
+        if len(rest) < 2:
+            await event.send(event.plain_result("用法：pic untag <短hash> <标签...>"))
+            return
+        full = await self._resolve(event, rest[0])
+        if not full:
+            return
+        tags = self._clean_tags(rest[1:])
+        remaining, deleted = self.store.remove_tags(full, tags)
+        if deleted:
+            await event.send(
+                event.plain_result(f"[{self.store.short(full)}] 已无标签，图片已删除")
+            )
         else:
-            await event.send(event.plain_result("发一下图片"))
-            group_id = event.get_group_id()
+            await event.send(
+                event.plain_result(
+                    f"[{self.store.short(full)}] 现有标签：{'、'.join(remaining) or '无'}"
+                )
+            )
 
-            @session_waiter(timeout=30)  # type: ignore  # noqa: F821
-            async def empty_mention_waiter(
-                controller: SessionController, event: AstrMessageEvent
-            ):
-                if (
-                    event.get_group_id() != group_id
-                    or event.get_sender_id() != sender_id
-                ):
+    async def _delete(self, event: AstrMessageEvent, rest: list[str]):
+        if not rest:
+            await event.send(event.plain_result("用法：pic delete <短hash...>"))
+            return
+        done = []
+        for prefix in rest:
+            full, status = self.store.resolve(prefix)
+            if status == "ok" and self.store.delete(full):
+                done.append(self.store.short(full))
+        await event.send(
+            event.plain_result(f"已删除：{'、'.join(done) if done else '无'}")
+        )
+
+    async def _gc(self, event: AstrMessageEvent, rest: list[str]):
+        entries, files = self.store.gc()
+        await event.send(
+            event.plain_result(f"清理完成：悬空项 {entries}、孤儿文件 {files}")
+        )
+
+    # ---------------- 读操作 ----------------
+
+    async def _view(self, event: AstrMessageEvent, rest: list[str]):
+        if not rest:
+            await event.send(event.plain_result("用法：pic view <标签> 或 pic view <短hash>"))
+            return
+        arg = rest[0]
+        # 纯 hex 且能唯一解析 → 看单张原图
+        if HEX.match(arg.lower()):
+            full, status = self.store.resolve(arg)
+            if status == "ok":
+                p = self.store.path_of(full)
+                if p:
+                    await event.send(event.image_result(str(p)))
                     return
-                image = await get_image(event)
-                if image and gallery:
-                    controller.keep(timeout=30, reset_timeout=True)
-                    succ, result = gallery.add_image(image=image, author=author)  # type: ignore
-                    if succ:
-                        await event.send(event.plain_result(result))
-                    return
-
-                controller.stop()
-
-            try:
-                await empty_mention_waiter(event)
-            except TimeoutError as _:
-                await event.send(event.plain_result("存图结束"))
-            except Exception as e:
-                logger.error("批量存图发生错误：" + str(e))
-
-            event.stop_event()
-
-    async def delete_images(self, event: AstrMessageEvent):
-        """
-        删图 图库名 序号/all (多个序号用空格隔开)
-        """
-        args = await get_args(event)
-        name = args["names"][0]
-        indexs = args["numbers"]
-
-        gallery = self.manager.get_gallery(name)
-        if not gallery:
-            await event.send(event.plain_result(f"未找到图库【{name}】"))
+        # 否则按标签拼图
+        tag = filter_text(arg)
+        items = [
+            (str(p), self.store.short(h))
+            for h in self.store.by_tag(tag)
+            if (p := self.store.path_of(h))
+        ]
+        if not items:
+            await event.send(event.plain_result(f"标签【{tag}】下没有图片"))
             return
+        merged = self.merger.create_merged(items)
+        if merged:
+            await event.send(event.chain_result([Image.fromBytes(merged)]))
 
-        #  权限验证
-        perm = self.conf["perm_config"]["allow_del"]
-        if self.verify_perm(event, gallery, perm) is False:
-            await event.send(event.plain_result(f"你无权操作图库【{name}】"))
+    async def _tags(self, event: AstrMessageEvent, rest: list[str]):
+        counts = self.store.all_tags()
+        if not counts:
+            await event.send(event.plain_result("还没有任何标签"))
             return
+        ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        body = "、".join(f"{t}({c})" for t, c in ordered)
+        await event.send(event.plain_result(f"共 {len(counts)} 个标签：\n{body}"))
 
-        # 删除图片
-        if indexs != [0]:
-            reply = []
-            for index in indexs:
-                succ, result = gallery.delete_image_by_index(index)
-                if succ:
-                    reply.append(result)
-            await event.send(event.plain_result("\n".join(reply)))
-        # 删除图库
-        else:
-            is_deleted = await self.manager.delete_gallery(name)
-            reply = f"已删除图库【{name}】" if is_deleted else "删除图库【{name}】失败"
-            await event.send(event.plain_result(reply))
-
-    async def view_images(self, event: AstrMessageEvent):
-        """
-        看图 序号/图库名
-        """
-        args = await get_args(event)
-        name = args["names"][0]
-        indexs = args["numbers"]
-
-        gallery = self.manager.get_gallery(name)
-        if not gallery:
-            await event.send(event.plain_result(f"未找到图库【{name}】"))
+    async def _info(self, event: AstrMessageEvent, rest: list[str]):
+        if not rest:
+            await event.send(event.plain_result("用法：pic info <短hash>"))
             return
-
-        #  权限验证
-        perm = self.conf["perm_config"]["allow_view"]
-        if self.verify_perm(event, gallery, perm) is False:
-            await event.send(event.plain_result(f"你无权查看图库【{name}】"))
+        full = await self._resolve(event, rest[0])
+        if not full:
             return
-
-        # 查看图片
-        if indexs != [0]:
-            for index in indexs:
-                succ, result = gallery.view_by_index(index)
-                if succ:
-                    await event.send(event.image_result(result))  # type: ignore
-                else:
-                    await event.send(event.plain_result(result))  # type: ignore
-
-        # 查看图库
-        else:
-            merged = self.merger.create_merged(gallery.path)
-            if merged:
-                await event.send(event.chain_result([Image.fromBytes(merged)]))
-            else:
-                await event.send(event.plain_result(f"图库【{name}】为空"))
-
-    async def view_all(self, event: AstrMessageEvent):
-        """查看所有图库"""
-        galleries = self.manager.galleries
-        if not galleries:
-            await event.send(event.plain_result("未创建任何图库"))
-            return
-        names = self.manager.get_all_galleries_names()
+        m = self.store.images[full]
         await event.send(
             event.plain_result(
-                f"------共{len(galleries)}个图库------\n{'、'.join(names)}"
+                f"短hash：{self.store.short(full)}\n"
+                f"标签：{'、'.join(m['tags'])}\n"
+                f"创建者：{m['creator_id']}\n"
+                f"时间：{m['created_at']}\n"
+                f"格式：{m['ext']}"
             )
         )
 
-    async def gallery_details(self, event: AstrMessageEvent):
-        """查看图库的详细信息"""
-        args = await get_args(event)
-        for name in args["names"]:
-            gallery = self.manager.get_gallery(name)
-            if not gallery:
-                await event.send(event.plain_result(f"未找到图库【{name}】"))
-                return
-            await event.send(event.plain_result(gallery.to_str()))
-
-    async def find_path(self, event: AstrMessageEvent):
-        """查看图库路径"""
-        args = await get_args(event)
-        for name in args["names"]:
-            gallery = self.manager.get_gallery(name)
-            if not gallery:
-                await event.send(event.plain_result(f"未找到图库【{name}】"))
-                return
-            image = await get_image(event)
-            if not image:
-                await event.send(event.plain_result(f"图库【{name}】中无此图"))
-                return
-            succ, result = gallery.view_by_bytes(image=image)  # type: ignore
-            await event.send(event.plain_result(str(result)))
+    async def _search(self, event: AstrMessageEvent, rest: list[str]):
+        await event.send(event.plain_result("语义检索待接入 embedding，敬请期待"))

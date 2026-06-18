@@ -2,7 +2,7 @@
 
 # astrbot_plugin_gallery
 
-_✨ [AstrBot](https://github.com/AstrBotDevs/AstrBot) 标签表情包池 ✨_
+_✨ [AstrBot](https://github.com/AstrBotDevs/AstrBot) 图片库 ✨_
 
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)

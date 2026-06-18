@@ -1,5 +1,5 @@
 name: astrbot_plugin_gallery
-display_name: 标签表情包池
+display_name: 图片库
 desc: 标签化的表情包/图片池——内容寻址去重、一图多标签（多义不重复存）、可引用图片或用短hash 操作，并注入 LLM 工具让大模型按语义主动发表情
 help: |
   指令组 pic（中英子指令都认，🔒=需管理员）：

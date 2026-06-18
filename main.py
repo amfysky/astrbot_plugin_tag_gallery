@@ -38,12 +38,56 @@ class GalleryPlugin(Star):
         """自动收集群聊图片，用 LLM 打标签入池"""
         await self.auto.collect_image(event)
 
-    # ============ 指令（pic 前缀，写操作内部校验管理员）============
+    # ============ 指令（pic 命令组，写操作需管理员）============
 
-    @filter.command("pic")
-    async def pic(self, event: AstrMessageEvent):
-        """表情包图库指令，发 `pic` 查看帮助"""
-        await self.operator.dispatch(event)
+    @filter.command_group("pic", alias={"图库"})
+    def pic(self):
+        """表情包图库指令组，发 `pic help` 查看帮助"""
+
+    @pic.command("help", alias={"帮助"})
+    async def pic_help(self, event: AstrMessageEvent):
+        await self.operator.help(event)
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @pic.command("save", alias={"存图", "存", "添加"})
+    async def pic_save(self, event: AstrMessageEvent):
+        await self.operator.save(event)
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @pic.command("tag", alias={"打标", "加标签"})
+    async def pic_tag(self, event: AstrMessageEvent):
+        await self.operator.tag(event)
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @pic.command("untag", alias={"去标", "删标签"})
+    async def pic_untag(self, event: AstrMessageEvent):
+        await self.operator.untag(event)
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @pic.command("delete", alias={"del", "删图", "删", "删除"})
+    async def pic_delete(self, event: AstrMessageEvent):
+        await self.operator.delete(event)
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @pic.command("gc", alias={"清理"})
+    async def pic_gc(self, event: AstrMessageEvent):
+        await self.operator.gc(event)
+
+    @pic.command("view", alias={"看图", "看", "查看"})
+    async def pic_view(self, event: AstrMessageEvent):
+        await self.operator.view(event)
+
+    @pic.command("tags", alias={"标签", "标签列表"})
+    async def pic_tags(self, event: AstrMessageEvent):
+        await self.operator.tags(event)
+
+    @pic.command("info", alias={"信息", "详情", "图片信息"})
+    async def pic_info(self, event: AstrMessageEvent):
+        await self.operator.info(event)
+
+    @pic.command("search", alias={"搜图", "找图", "搜"})
+    async def pic_search(self, event: AstrMessageEvent):
+        await self.operator.search(event)
 
     # ============ LLM 函数工具（供大模型主动调用）============
 

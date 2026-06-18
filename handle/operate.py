@@ -24,57 +24,23 @@ HELP = (
 
 
 class GalleryOperate:
+    """pic 各子指令的具体逻辑；指令路由/权限/别名由 main.py 的 command_group 负责"""
+
     def __init__(self, store: ImageStore, merger: GalleryImageMerger):
         self.store = store
         self.merger = merger
 
-        # (规范名, handler, 是否写操作, 中文别名...) —— 路由与管理员校验从一处生成
-        spec = [
-            ("save", self._save, True, "存图", "存", "添加"),
-            ("tag", self._tag, True, "打标", "加标签", "标"),
-            ("untag", self._untag, True, "去标", "删标签"),
-            ("delete", self._delete, True, "del", "删图", "删", "删除"),
-            ("gc", self._gc, True, "清理"),
-            ("view", self._view, False, "看图", "看", "查看"),
-            ("tags", self._tags, False, "标签", "标签列表"),
-            ("info", self._info, False, "信息", "详情", "图片信息"),
-            ("search", self._search, False, "搜图", "找图", "搜"),
-        ]
-        self._routes: dict = {}
-        self._writes: set = set()
-        for name, fn, is_write, *aliases in spec:
-            for key in (name, *aliases):
-                self._routes[key] = fn
-                if is_write:
-                    self._writes.add(key)
-
-    # ---------------- 分发 ----------------
-
     @staticmethod
-    def _tokens(event: AstrMessageEvent) -> list[str]:
-        """从 Plain 段取参数（避开引用概要/[MSG_ID:] 污染），去掉 pic 指令词"""
+    def _args(event: AstrMessageEvent) -> list[str]:
+        """从 Plain 段取子指令参数（避开引用概要/[MSG_ID:] 污染），去掉 pic + 子指令两个词"""
         plain = "".join(
             seg.text for seg in event.get_messages() if isinstance(seg, Plain)
         )
         plain = re.sub(r"\[MSG_ID:[^\]]*\]", " ", plain)
-        return plain.strip().split()[1:]
+        return plain.strip().split()[2:]
 
-    async def dispatch(self, event: AstrMessageEvent):
-        tokens = self._tokens(event)
-        if not tokens:
-            await event.send(event.plain_result(HELP))
-            return
-        sub, rest = tokens[0].lower(), tokens[1:]
-
-        if sub in self._writes and not event.is_admin():
-            await event.send(event.plain_result("该操作需要管理员权限"))
-            return
-
-        handler = self._routes.get(sub)
-        if not handler:
-            await event.send(event.plain_result(f"未知子指令：{sub}\n\n{HELP}"))
-            return
-        await handler(event, rest)
+    async def help(self, event: AstrMessageEvent):
+        await event.send(event.plain_result(HELP))
 
     # ---------------- 工具 ----------------
 
@@ -112,8 +78,8 @@ class GalleryOperate:
 
     # ---------------- 写操作 ----------------
 
-    async def _save(self, event: AstrMessageEvent, rest: list[str]):
-        tags = self._clean_tags(rest)
+    async def save(self, event: AstrMessageEvent):
+        tags = self._clean_tags(self._args(event))
         if not tags:
             await event.send(event.plain_result("用法：pic save <标签...>（至少一个标签）"))
             return
@@ -127,9 +93,9 @@ class GalleryOperate:
             event.plain_result(f"{verb} [{short}]，标签：{'、'.join(tags)}")
         )
 
-    async def _tag(self, event: AstrMessageEvent, rest: list[str]):
+    async def tag(self, event: AstrMessageEvent):
         """pic tag <短hash> <标签...>  或  (引用图) pic tag <标签...>"""
-        full, extra, err = await self._target(event, rest)
+        full, extra, err = await self._target(event, self._args(event))
         if not full:
             await event.send(event.plain_result(err))
             return
@@ -142,9 +108,9 @@ class GalleryOperate:
             event.plain_result(f"[{self.store.short(full)}] 现有标签：{'、'.join(now)}")
         )
 
-    async def _untag(self, event: AstrMessageEvent, rest: list[str]):
+    async def untag(self, event: AstrMessageEvent):
         """pic untag <短hash> <标签...>  或  (引用图) pic untag <标签...>"""
-        full, extra, err = await self._target(event, rest)
+        full, extra, err = await self._target(event, self._args(event))
         if not full:
             await event.send(event.plain_result(err))
             return
@@ -164,7 +130,7 @@ class GalleryOperate:
                 )
             )
 
-    async def _delete(self, event: AstrMessageEvent, rest: list[str]):
+    async def delete(self, event: AstrMessageEvent):
         """(引用图) pic delete  或  pic delete <短hash...>"""
         # 引用/附带图片 → 删这一张
         image = await get_image(event)
@@ -177,6 +143,7 @@ class GalleryOperate:
             await event.send(event.plain_result(f"已删除 [{self.store.short(h)}]"))
             return
         # 否则按短hash 批量删
+        rest = self._args(event)
         if not rest:
             await event.send(
                 event.plain_result("请引用要删的图片，或：pic delete <短hash...>")
@@ -191,7 +158,7 @@ class GalleryOperate:
             event.plain_result(f"已删除：{'、'.join(done) if done else '无'}")
         )
 
-    async def _gc(self, event: AstrMessageEvent, rest: list[str]):
+    async def gc(self, event: AstrMessageEvent):
         entries, files = self.store.gc()
         await event.send(
             event.plain_result(f"清理完成：悬空项 {entries}、孤儿文件 {files}")
@@ -199,7 +166,8 @@ class GalleryOperate:
 
     # ---------------- 读操作 ----------------
 
-    async def _view(self, event: AstrMessageEvent, rest: list[str]):
+    async def view(self, event: AstrMessageEvent):
+        rest = self._args(event)
         if not rest:
             await event.send(event.plain_result("用法：pic view <标签> 或 pic view <短hash>"))
             return
@@ -226,7 +194,7 @@ class GalleryOperate:
         if merged:
             await event.send(event.chain_result([Image.fromBytes(merged)]))
 
-    async def _tags(self, event: AstrMessageEvent, rest: list[str]):
+    async def tags(self, event: AstrMessageEvent):
         counts = self.store.all_tags()
         if not counts:
             await event.send(event.plain_result("还没有任何标签"))
@@ -235,9 +203,9 @@ class GalleryOperate:
         body = "、".join(f"{t}({c})" for t, c in ordered)
         await event.send(event.plain_result(f"共 {len(counts)} 个标签：\n{body}"))
 
-    async def _info(self, event: AstrMessageEvent, rest: list[str]):
+    async def info(self, event: AstrMessageEvent):
         """pic info <短hash>  或  (引用图) pic info"""
-        full, _, err = await self._target(event, rest)
+        full, _, err = await self._target(event, self._args(event))
         if not full:
             await event.send(event.plain_result(err))
             return
@@ -252,5 +220,5 @@ class GalleryOperate:
             )
         )
 
-    async def _search(self, event: AstrMessageEvent, rest: list[str]):
+    async def search(self, event: AstrMessageEvent):
         await event.send(event.plain_result("语义检索待接入 embedding，敬请期待"))

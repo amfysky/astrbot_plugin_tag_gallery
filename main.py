@@ -1,4 +1,6 @@
+import shutil
 from pathlib import Path
+from uuid import uuid4
 
 from astrbot.api.event import filter
 from astrbot.api.star import Context, Star, register
@@ -6,10 +8,21 @@ from astrbot.core import AstrBotConfig
 from astrbot.core.platform import AstrMessageEvent
 from astrbot.core.star.filter.event_message_type import EventMessageType
 from astrbot.core.star.star_tools import StarTools
+from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 
 from .core import GalleryImageMerger, ImageStore
 from .handle.auto import GalleryAuto
 from .handle.operate import GalleryOperate
+
+
+def _cache_image_for_send(src: Path) -> str:
+    """把表情包复制到 AstrBot 临时目录（send_message_to_user 允许发送的根目录之一），
+    返回可直接交给 send_message_to_user 的 posix 路径。"""
+    cache_dir = Path(get_astrbot_temp_path()) / "tool_images"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    dst = cache_dir / f"gallery_{uuid4().hex[:8]}{src.suffix}"
+    shutil.copyfile(src, dst)
+    return dst.as_posix()
 
 
 @register(
@@ -108,7 +121,11 @@ class GalleryPlugin(Star):
 
     @filter.llm_tool(name="send_image_by_tag")
     async def send_image_by_tag(self, event: AstrMessageEvent, tag: str):
-        """从指定标签随机发送一张表情包图片给用户。当用表情包回应会更生动时调用。
+        """挑一张指定标签的表情包，交给 send_message_to_user 连同你的文字回复一并发给用户。
+
+        当你判断配一张表情能让回复更生动时调用。调用后请照工具返回的提示，
+        用 send_message_to_user 把表情和你要说的话放进同一次调用发出；
+        若只想发表情、不配文字，文字部分留空即可。想多发几张就多次调用本工具。
 
         Args:
             tag(string): 标签名，须是 list_tags 返回的标签之一
@@ -119,5 +136,12 @@ class GalleryPlugin(Star):
         p = self.store.path_of(h)
         if not p:
             return f"标签【{tag}】的图片文件缺失"
-        await event.send(event.image_result(str(p)))
-        return f"已发送一张【{tag}】表情包"
+
+        # 交给 LLM 用内置 send_message_to_user 工具发送，图文可放进同一次调用一并发出
+        path = _cache_image_for_send(p)
+        return (
+            f"已选好一张【{tag}】表情包，已缓存到 path='{path}'。"
+            "请调用 send_message_to_user 工具，在 messages 数组里同时放入"
+            f'这张图片 {{"type": "image", "path": "{path}"}} 和你要对用户说的话 '
+            f'{{"type": "plain", "text": "你的回复"}}，一次性发给用户。'
+        )

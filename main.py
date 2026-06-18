@@ -110,7 +110,7 @@ class GalleryPlugin(Star):
 
     # ============ LLM 函数工具（供大模型主动调用）============
 
-    @filter.llm_tool(name="list_tags")
+    @filter.llm_tool(name="list_all_image_tags")
     async def list_tags(self, event: AstrMessageEvent):
         """列出所有可用的表情包标签及图片数量，用于了解可以发送哪些类型的表情。"""
         counts = self.store.all_tags()
@@ -119,8 +119,8 @@ class GalleryPlugin(Star):
         ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
         return "可用标签：\n" + "\n".join(f"- {t}（{c} 张）" for t, c in ordered)
 
-    @filter.llm_tool(name="send_image_by_tag")
-    async def send_image_by_tag(self, event: AstrMessageEvent, tag: str):
+    @filter.llm_tool(name="get_image_by_tag")
+    async def get_image_by_tag(self, event: AstrMessageEvent, tag: str):
         """挑一张指定标签的表情包，交给 send_message_to_user 连同你的文字回复一并发给用户。
 
         当你判断配一张表情能让回复更生动时调用。调用后请照工具返回的提示，

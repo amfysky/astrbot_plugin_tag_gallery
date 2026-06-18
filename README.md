@@ -1,130 +1,85 @@
-
 <div align="center">
-
-![:name](https://count.getloli.com/@astrbot_plugin_gallery?name=astrbot_plugin_gallery&theme=minecraft&padding=6&offset=0&align=top&scale=1&pixelated=1&darkmode=auto)
 
 # astrbot_plugin_gallery
 
-_✨ [astrbot](https://github.com/AstrBotDevs/AstrBot) 图库管理器 ✨_  
+_✨ [AstrBot](https://github.com/AstrBotDevs/AstrBot) 标签表情包池 ✨_
 
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![AstrBot](https://img.shields.io/badge/AstrBot-3.4%2B-orange.svg)](https://github.com/Soulter/AstrBot)
-[![GitHub](https://img.shields.io/badge/作者-Zhalslar-blue)](https://github.com/Zhalslar)
+[![GitHub](https://img.shields.io/badge/作者-amfysky-blue)](https://github.com/amfysky)
 
 </div>
 
 ## 🤝 介绍
 
-【本地图库管理器】-帮助用户组建、管理、调用本地图库，可用于表情包收集管理、图床管理、为其他插件提供动态图库等等
+标签化的表情包 / 图片池。核心是把**存储**和**分类**拆开：
 
-## ✨ 最近更新
+- **内容寻址、自动去重**：每张图按 `sha256` 只存一份，重复图自动合并。
+- **一图多标签（多义）**：一张"笑哭"可同时属于 `开心`、`搞笑`，磁盘上只有一份。
+- **引用图 / 短 hash 操作**：删图、改标签既能"引用那张图"，也能用 git 式短 hash。
+- **注入 LLM 工具**：大模型能 `list_tags` 看有哪些标签、`send_image_by_tag` 按语义主动发表情（"开心≈高兴"由大模型自己理解）。
+- **自动回收（GC）**：标签清空即删图，启动自愈对账清理孤儿文件，不留垃圾。
 
-支持自动收集用户的表情包，支持LLM调用表情包
+> 本插件 fork 并重写自 [Zhalslar/astrbot_plugin_gallery](https://github.com/Zhalslar/astrbot_plugin_gallery)，感谢原作者。
 
 ## 📦 安装
 
-直接在astrbot的插件市场搜索astrbot_plugin_gallery，点击安装，等待完成即可
-
-- 或者可以直接克隆源码到插件文件夹：
-
 ```bash
-# 克隆仓库到插件目录
 cd /AstrBot/data/plugins
-git clone https://github.com/Zhalslar/astrbot_plugin_gallery
-# 控制台重启AstrBot
+git clone https://github.com/amfysky/astrbot_plugin_gallery
+# 控制台重启 / 重载 AstrBot
 ```
+
+旧版 `astrbot_plugin_gallery` 的图库文件夹放进图片池根目录，插件初始化时会**自动迁移**进池（文件夹名作为标签，跨文件夹同图自动合并），原文件夹保留待你核对。
+
+## ⌨️ 指令
+
+指令组 `pic`（子指令中英文都认；🔒 表示需要管理员；下方 `<短hash>` 都可改成「引用那张图」）。
+
+| 指令 | 中文别名 | 说明 | 权限 |
+|------|----------|------|:----:|
+| `pic save <标签...>` | `pic 存图` | 带图/引用图，存图并打标签 | 🔒 |
+| `pic tag [短hash] <标签...>` | `pic 打标` | 给图追加标签（一图多义） | 🔒 |
+| `pic untag [短hash] <标签...>` | `pic 去标` | 移除标签，清空则删图 | 🔒 |
+| `pic delete [短hash...]` | `pic 删图` | 删除图片 | 🔒 |
+| `pic gc` | `pic 清理` | 手动清理无用图片 | 🔒 |
+| `pic view <标签>` | `pic 看图` | 查看该标签下所有图（拼图，标注短hash） | |
+| `pic view <短hash>` | `pic 看图` | 查看单张原图 | |
+| `pic tags` | `pic 标签` | 列出所有标签及数量 | |
+| `pic info [短hash]` | `pic 信息` | 查看某图的标签 / 创建者 | |
+| `pic help` | `pic 帮助` | 查看帮助 | |
+
+示例：`pic save 开心 搞笑`、引用一张图 + `pic 删图`、`pic tag 开心`、`pic view 开心`。
+
+## 🤖 LLM 工具
+
+开启函数调用后，大模型可主动使用：
+
+- `list_tags()` —— 列出所有标签及数量
+- `send_image_by_tag(tag)` —— 从指定标签随机发一张表情
+
+这样"用户很高兴 → 发个开心表情"由大模型按语义决定，比关键词匹配更准。
+
 ## ⚙️ 配置
 
-### 插件配置
+在 AstrBot 面板：插件管理 → astrbot_plugin_gallery → 插件配置。
 
-请在astrbot面板配置，插件管理 -> astrbot_plugin_gallery -> 操作 -> 插件配置
+- `galleries_dir`：图片池根目录（存 `images/` 与 `index.json`）
+- `auto_collect`：自动收集群聊图片并用 LLM 打标签入池（默认关）
+- `http_proxy`：外部请求代理
 
-### Docker 部署配置
-
-如果您是 Docker 部署，请务必将消息平台容器和AstrBot挂载容器到同一个文件夹，否则消息平台将无法解析文件路径。
-
-示例挂载方式(NapCat)：
-
-- 对 **AstrBot**：`/vol3/1000/dockerSharedFolder -> /app/sharedFolder`
-- 对 **NapCat**：`/vol3/1000/dockerSharedFolder -> /app/sharedFolder`
-
-## ⌨️ 使用说明
-
-### 技巧
-
-- 图片存储目录：data\plugins_data\astrbot_plugin_gallery
-  
-- 你可以自行创建子文件夹后将你的图片拖入，插件初始化时会自动加载这个子文件作为一个图库，子文件夹名作为这个图库的触发词，文件里的图片名也会自动格式化成插件需要的格式。
-  
-- 可以在配置中打开自动收集图片功能，这在插件前期是非常好用的功能，能帮你快速组建图库
-- 每个用户都对应着一个专属图库，专属图库在用户存入第一张图片时会自动创建，密码为用户对应的ID（如Q号），你可以鼓励、引导用户使用自己的专属图库。
-- 专属图库只有图库主人或者bot管理员可以访问，公共图库的权限可在插件配置面板中配置
-- 新建的图库会默认打开去重开关，去重机制可以保证不会往同一个图库中添加重复的图片
-- 新建的图库会默认打开压缩开关，可有效减少图库的存储占用大小，也能让表情包在QQ中以小图显示，但对于一些图库压缩可能并不是一件好事（比如壁纸图库），此时你可以用命令关掉压缩
-
-### 命令表
-
-`/图库帮助` - 查看以下的帮助菜单(标有s表示可输入多个,空格隔开参数,图库名皆可用@某人代替)
-
-| 命令 | 描述 | 示例用法 |
-|------|------|----------|
-| `/精准匹配词` | 查看精准匹配词 | `/精准匹配词` |
-| `/模糊匹配词` | 查看模糊匹配词 | `/模糊匹配词` |
-| `/模糊匹配 <图库名s>` | 将指定图库切换到模糊匹配模式 | `/模糊匹配 图库A 图库B` |
-| `/精准匹配 <图库名s>` | 将指定图库切换到精准匹配模式 | `/精准匹配 图库A 图库B` |
-| `/添加匹配词 <图库名> <匹配词s>` | 为指定图库添加匹配词 | `/添加匹配词 图库A 关键词1 关键词2` |
-| `/删除匹配词 <图库名> <匹配词s>` | 为指定图库删除匹配词 | `/删除匹配词 图库A 关键词1 关键词2` |
-| `/设置容量 <图库名> <容量>` | 设置指定图库的容量上限 | `/设置容量 图库A 100` |
-| `/设置容量 <图库名> <密码>` | 设置指定图库的密码 | `/设置密码 图库A 114514` |
-| `/开启压缩 <图库名s>` | 打开指定图库的压缩开关 | `/开启压缩 图库A 图库B` |
-| `/关闭压缩 <图库名s>` | 关闭指定图库的压缩开关 | `/关闭压缩 图库A 图库B` |
-| `/开启去重 <图库名s>` | 打开指定图库的去重开关 | `/开启去重 图库A 图库B` |
-| `/关闭去重 <图库名s>` | 关闭指定图库的去重开关 | `/关闭去重 图库A 图库B` |
-| `/去重 <图库名s>` | 去除图库里重复的图片 | `/去重 图库A 图库B` |
-| `/存图 <图库名> <序号>` | 存图到指定图库，序号指定时会替换掉原图，图库名不填则默认自己昵称，也可 @他人作为图库名 | `/存图 图库A` 或 `/存图 图库A 1`|
-| `/删图 <图库名> <序号s>` | 删除指定图库中的图片，序号不指定表示删除整个图库 | `/删图 图库A 1 2` 或 `/删图 图库A` |
-| `/查看 <序号s/图库名>` | 查看指定图库中的图片或图库详情，序号指定时查看单张图片 | `/查看 图库A` 或 `/查看 1` |
-| `/图库列表` | 查看所有图库 | `/图库列表` |
-| `/图库详情 <图库名s>` | 查看指定图库的详细信息 | `/图库详情 图库A` |
-| `/(引用图片)/路径 <图库名s>` | 查看指定图片的路径，需指定在哪个图库查找 | `/(引用图片)/路径 图库A` |
-| `/(引用图片)/解析` | 解析图片的信息 | `/(引用图片)/解析` |
-| `/上传图库 <图库名s>` | 将图库打包成ZIP上传(仅aiocqhttp) | `/上传图库 图库A` |
-| `(引用ZIP)/下载图库 <图库名>` | 下载ZIP重命名后加载为图库 | `/下载图库 新名` |
-
-
-### 示例图（可以直接指定图库名，也可以直接@群友）
-
-![b00a0155936cbee94980aaf7b6a4de4](https://github.com/user-attachments/assets/f47189f6-eb87-4a7f-98e9-e8661aab29e5)
-
-## ⌨️ 配置
-
-请前往插件配置面板进行配置
+> Docker 部署：务必把消息平台容器与 AstrBot 挂载到同一文件夹，否则无法解析图片路径。
 
 ## 🤝 TODO
 
-- [x] 支持保存、删除、查看图片/图库
-- [x] 支持批量保存、批量删除图片
-- [x] 支持精准/模糊匹配模糊匹配关键词发图，并提供开关
-- [x] 支持在图库里搜索图片
-- [x] 支持解析图片信息
-- [x] 支持设置图库容量
-- [x] 自动压缩图片，并提供压缩开关
-- [x] 自动去重，并提供去重开关
-- [x] 权限控制
-- [x] 支持热重载（存图、删图实时生效）
-- [x] 支持将批量图片拖入文件夹进行加载
-- [x] LLM调用图片
-- [x] 自动收集图片
+- [x] 内容寻址图片池 + 自动去重
+- [x] 一图多标签（多义）
+- [x] 引用图 / 短 hash 操作
+- [x] 图片回收（即时 + 启动自愈对账）
+- [x] 旧图库文件夹自动迁移
+- [x] 注入 LLM 工具（list_tags / send_image_by_tag）
+- [ ] embedding 语义检索（`pic search`，让"开心≈高兴"在算法层也打通）
 
-## 👥 贡献指南
+## 📌 致谢
 
-- 🌟 Star 这个项目！（点右上角的星星，感谢支持！）
-- 🐛 提交 Issue 报告问题
-- 💡 提出新功能建议
-- 🔧 提交 Pull Request 改进代码
-
-## 📌 注意事项
-
-- ~~由于要实现的功能繁多，目前仅确保图库的各种基本功能，后续会完善到完整体~~
-- 想第一时间得到反馈的可以来作者的插件反馈群（QQ群）：460973561（不点star不给进）
+Fork 自 [Zhalslar/astrbot_plugin_gallery](https://github.com/Zhalslar/astrbot_plugin_gallery)，在其基础上重写为标签池架构。

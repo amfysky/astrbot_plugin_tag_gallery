@@ -1,7 +1,17 @@
-name: astrbot_plugin_gallery # 这是你的插件的唯一识别名。
-display_name: 图库管理器
-desc: 帮助用户组建、管理、调用本地图库，可用于表情包收集管理、图床管理、为其他插件提供动态图库等等 # 插件简短描述
-help: ...  # 插件的帮助信息
-version: v2.1.0 # 插件版本号。格式：v1.1.1 或者 v1.1
-author: Zhalslar # 作者
-repo: https://github.com/Zhalslar/astrbot_plugin_gallery # 插件的仓库地址
+name: astrbot_plugin_gallery
+display_name: 标签表情包池
+desc: 标签化的表情包/图片池——内容寻址去重、一图多标签（多义不重复存）、可引用图片或用短hash 操作，并注入 LLM 工具让大模型按语义主动发表情
+help: |
+  指令组 pic（中英子指令都认，🔒=需管理员）：
+  🔒 pic save <标签...>            带图/引用图，存图并打标签
+  🔒 pic tag [短hash] <标签...>    给图加标签（可引用图代替短hash）
+  🔒 pic untag [短hash] <标签...>  去标签（清空则删图）
+  🔒 pic delete [短hash...]        删图（可引用图）
+  🔒 pic gc                        清理无用图片
+  pic view <标签|短hash>           看该标签拼图 / 看单张原图
+  pic tags / pic info / pic help
+  中文别名：pic 存图 / pic 看图 / pic 删图 ...
+  LLM 工具：list_tags、send_image_by_tag（让大模型自己挑标签发表情）
+version: v3.0.0
+author: amfysky
+repo: https://github.com/amfysky/astrbot_plugin_gallery

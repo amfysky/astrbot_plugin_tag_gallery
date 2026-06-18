@@ -26,7 +26,7 @@ def _cache_image_for_send(src: Path) -> str:
 
 
 @register(
-    "astrbot_plugin_gallery",
+    "astrbot_plugin_tag_gallery",
     "amfysky",
     "标签化表情包池：内容寻址去重、一图多标签、引用图/短hash 操作，注入 LLM 工具按语义发表情",
     "3.0.0",
@@ -37,8 +37,8 @@ class GalleryPlugin(Star):
         self.context = context
         self.conf = config
 
-        # 数据目录沿用旧名 astrbot_plugin_gallery，避免改插件名后丢失已有图片
-        self.plugin_data_dir = StarTools.get_data_dir("astrbot_plugin_gallery")
+        # 数据目录沿用旧名 astrbot_plugin_tag_gallery，避免改插件名后丢失已有图片
+        self.plugin_data_dir = StarTools.get_data_dir("astrbot_plugin_tag_gallery")
         # 图片池与索引的根目录（可在配置里改）
         base = config.get("galleries_dir") or self.plugin_data_dir / "galleries"
         self.base_dir = Path(base).resolve()

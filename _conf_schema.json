@@ -4,7 +4,7 @@
         "type": "string",
         "obvious_hint": true,
         "hint": "存放 images/ 图片池与 index.json 索引，支持绝对/相对路径；旧的图库文件夹放这里会自动迁移",
-        "default": "data/plugin_data/astrbot_plugin_gallery/galleries"
+        "default": "data/plugin_data/astrbot_plugin_tag_gallery/galleries"
     },
     "auto_collect": {
         "description": "自动收集配置",

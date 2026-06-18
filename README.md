@@ -1,6 +1,6 @@
 <div align="center">
 
-# astrbot_plugin_gallery
+# astrbot_plugin_tag_gallery
 
 _✨ [AstrBot](https://github.com/AstrBotDevs/AstrBot) 图片库 ✨_
 
@@ -26,7 +26,7 @@ _✨ [AstrBot](https://github.com/AstrBotDevs/AstrBot) 图片库 ✨_
 
 ```bash
 cd /AstrBot/data/plugins
-git clone https://github.com/amfysky/astrbot_plugin_gallery
+git clone https://github.com/amfysky/astrbot_plugin_tag_gallery
 # 控制台重启 / 重载 AstrBot
 ```
 
@@ -62,7 +62,7 @@ git clone https://github.com/amfysky/astrbot_plugin_gallery
 
 ## ⚙️ 配置
 
-在 AstrBot 面板：插件管理 → astrbot_plugin_gallery → 插件配置。
+在 AstrBot 面板：插件管理 → astrbot_plugin_tag_gallery → 插件配置。
 
 - `galleries_dir`：图片池根目录（存 `images/` 与 `index.json`）
 - `auto_collect`：自动收集群聊图片并用 LLM 打标签入池（默认关）

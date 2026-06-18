@@ -1,4 +1,4 @@
-name: astrbot_plugin_gallery
+name: astrbot_plugin_tag_gallery
 display_name: 图片库
 desc: 标签化的表情包/图片池——内容寻址去重、一图多标签（多义不重复存）、可引用图片或用短hash 操作，并注入 LLM 工具让大模型按语义主动发表情
 help: |
@@ -14,4 +14,4 @@ help: |
   LLM 工具：list_tags、send_image_by_tag（让大模型自己挑标签发表情）
 version: v3.0.0
 author: amfysky
-repo: https://github.com/amfysky/astrbot_plugin_gallery
+repo: https://github.com/amfysky/astrbot_plugin_tag_gallery
